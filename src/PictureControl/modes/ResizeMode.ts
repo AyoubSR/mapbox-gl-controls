@@ -21,7 +21,7 @@ class ResizeMode extends BaseMode {
     this.map.on('mousedown', this.picture.asCircleLayer.id, this.onPointerDown);
   }
 
-  onPointerDown(event: MapLayerMouseEvent) {
+  onPointerDown(event: any) {
     event.preventDefault();
     if (!this.picture) return;
     this.map.getCanvas().style.cursor = Cursor.Grabbing;
@@ -43,7 +43,6 @@ class ResizeMode extends BaseMode {
     const scaledPosition = this.picture.position;
 
     scaledPosition[this.currentIndex] = new LngLat(closestLngLat.lng, closestLngLat.lat);
-
     if (this.currentIndex === 0) {
       scaledPosition[1] = new LngLat(scaledPosition[1].lng, closestLngLat.lat);
       scaledPosition[3] = new LngLat(closestLngLat.lng, scaledPosition[3].lat);
@@ -57,7 +56,6 @@ class ResizeMode extends BaseMode {
       scaledPosition[2] = new LngLat(scaledPosition[2].lng, closestLngLat.lat);
       scaledPosition[0] = new LngLat(closestLngLat.lng, scaledPosition[0].lat);
     }
-
     this.onUpdate(scaledPosition);
   }
 

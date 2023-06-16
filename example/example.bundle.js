@@ -305,19 +305,22 @@
 	    return radians * factor;
 	}
 	/**
-	 * Converts any bearing angle from the north line direction (positive clockwise)
-	 * and returns an angle between 0-360 degrees (positive clockwise), 0 being the north line
+	 * Convert a distance measurement (assuming a spherical Earth) from a real-world unit into radians
+	 * Valid units: miles, nauticalmiles, inches, yards, meters, metres, kilometers, centimeters, feet
 	 *
-	 * @name bearingToAzimuth
-	 * @param {number} bearing angle, between -180 and +180 degrees
-	 * @returns {number} angle between 0 and 360 degrees
+	 * @name lengthToRadians
+	 * @param {number} distance in real units
+	 * @param {string} [units="kilometers"] can be degrees, radians, miles, inches, yards, metres,
+	 * meters, kilometres, kilometers.
+	 * @returns {number} radians
 	 */
-	function bearingToAzimuth(bearing) {
-	    var angle = bearing % 360;
-	    if (angle < 0) {
-	        angle += 360;
+	function lengthToRadians(distance, units) {
+	    if (units === void 0) { units = "kilometers"; }
+	    var factor = factors[units];
+	    if (!factor) {
+	        throw new Error(units + " units is invalid");
 	    }
-	    return angle;
+	    return distance / factor;
 	}
 	/**
 	 * Converts an angle in radians to degrees
@@ -354,20 +357,6 @@
 	 */
 	function isNumber(num) {
 	    return !isNaN(num) && num !== null && !Array.isArray(num);
-	}
-	/**
-	 * isObject
-	 *
-	 * @param {*} input variable to validate
-	 * @returns {boolean} true/false
-	 * @example
-	 * turf.isObject({elevation: 10})
-	 * //=true
-	 * turf.isObject('foo')
-	 * //=false
-	 */
-	function isObject(input) {
-	    return !!input && input.constructor === Object;
 	}
 
 	/**
@@ -631,6 +620,12 @@
 	            source: { type: 'geojson', data: this.asPolygon },
 	        };
 	    }
+	    get pointSource() {
+	        return {
+	            id: `${this.id}-points`,
+	            source: { type: 'geojson', data: this.asPoints },
+	        };
+	    }
 	    get asRasterLayer() {
 	        return {
 	            id: `${this.id}-raster`,
@@ -667,7 +662,7 @@
 	        return ({
 	            id: `${this.id}-circle`,
 	            type: 'circle',
-	            source: `${this.id}-polygon`,
+	            source: `${this.id}-points`,
 	            paint: {
 	                'circle-radius': 5,
 	                'circle-color': 'rgb(61, 90, 254)',
@@ -1010,118 +1005,86 @@
 	    return bear;
 	}
 
-	// https://en.wikipedia.org/wiki/Rhumb_line
+	//http://en.wikipedia.org/wiki/Haversine_formula
+	//http://www.movable-type.co.uk/scripts/latlong.html
 	/**
-	 * Takes two {@link Point|points} and finds the bearing angle between them along a Rhumb line
-	 * i.e. the angle measured in degrees start the north line (0 degrees)
+	 * Calculates the distance between two {@link Point|points} in degrees, radians, miles, or kilometers.
+	 * This uses the [Haversine formula](http://en.wikipedia.org/wiki/Haversine_formula) to account for global curvature.
 	 *
-	 * @name rhumbBearing
-	 * @param {Coord} start starting Point
-	 * @param {Coord} end ending Point
-	 * @param {Object} [options] Optional parameters
-	 * @param {boolean} [options.final=false] calculates the final bearing if true
-	 * @returns {number} bearing from north in decimal degrees, between -180 and 180 degrees (positive clockwise)
+	 * @name distance
+	 * @param {Coord | Point} from origin point or coordinate
+	 * @param {Coord | Point} to destination point or coordinate
+	 * @param {Object} [options={}] Optional parameters
+	 * @param {string} [options.units='kilometers'] can be degrees, radians, miles, or kilometers
+	 * @returns {number} distance between the two points
 	 * @example
-	 * var point1 = turf.point([-75.343, 39.984], {"marker-color": "#F00"});
-	 * var point2 = turf.point([-75.534, 39.123], {"marker-color": "#00F"});
+	 * var from = turf.point([-75.343, 39.984]);
+	 * var to = turf.point([-75.534, 39.123]);
+	 * var options = {units: 'miles'};
 	 *
-	 * var bearing = turf.rhumbBearing(point1, point2);
+	 * var distance = turf.distance(from, to, options);
 	 *
 	 * //addToMap
-	 * var addToMap = [point1, point2];
-	 * point1.properties.bearing = bearing;
-	 * point2.properties.bearing = bearing;
+	 * var addToMap = [from, to];
+	 * from.properties.distance = distance;
+	 * to.properties.distance = distance;
 	 */
-	function rhumbBearing(start, end, options) {
+	function distance(from, to, options) {
 	    if (options === void 0) { options = {}; }
-	    var bear360;
-	    if (options.final) {
-	        bear360 = calculateRhumbBearing(getCoord(end), getCoord(start));
-	    }
-	    else {
-	        bear360 = calculateRhumbBearing(getCoord(start), getCoord(end));
-	    }
-	    var bear180 = bear360 > 180 ? -(360 - bear360) : bear360;
-	    return bear180;
-	}
-	/**
-	 * Returns the bearing from ‘this’ point to destination point along a rhumb line.
-	 * Adapted from Geodesy: https://github.com/chrisveness/geodesy/blob/master/latlon-spherical.js
-	 *
-	 * @private
-	 * @param   {Array<number>} from - origin point.
-	 * @param   {Array<number>} to - destination point.
-	 * @returns {number} Bearing in degrees from north.
-	 * @example
-	 * var p1 = new LatLon(51.127, 1.338);
-	 * var p2 = new LatLon(50.964, 1.853);
-	 * var d = p1.rhumbBearingTo(p2); // 116.7 m
-	 */
-	function calculateRhumbBearing(from, to) {
-	    // φ => phi
-	    // Δλ => deltaLambda
-	    // Δψ => deltaPsi
-	    // θ => theta
-	    var phi1 = degreesToRadians(from[1]);
-	    var phi2 = degreesToRadians(to[1]);
-	    var deltaLambda = degreesToRadians(to[0] - from[0]);
-	    // if deltaLambdaon over 180° take shorter rhumb line across the anti-meridian:
-	    if (deltaLambda > Math.PI) {
-	        deltaLambda -= 2 * Math.PI;
-	    }
-	    if (deltaLambda < -Math.PI) {
-	        deltaLambda += 2 * Math.PI;
-	    }
-	    var deltaPsi = Math.log(Math.tan(phi2 / 2 + Math.PI / 4) / Math.tan(phi1 / 2 + Math.PI / 4));
-	    var theta = Math.atan2(deltaLambda, deltaPsi);
-	    return (radiansToDegrees(theta) + 360) % 360;
+	    var coordinates1 = getCoord(from);
+	    var coordinates2 = getCoord(to);
+	    var dLat = degreesToRadians(coordinates2[1] - coordinates1[1]);
+	    var dLon = degreesToRadians(coordinates2[0] - coordinates1[0]);
+	    var lat1 = degreesToRadians(coordinates1[1]);
+	    var lat2 = degreesToRadians(coordinates2[1]);
+	    var a = Math.pow(Math.sin(dLat / 2), 2) +
+	        Math.pow(Math.sin(dLon / 2), 2) * Math.cos(lat1) * Math.cos(lat2);
+	    return radiansToLength(2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)), options.units);
 	}
 
+	// http://en.wikipedia.org/wiki/Haversine_formula
 	/**
-	 * Finds the angle formed by two adjacent segments defined by 3 points. The result will be the (positive clockwise)
-	 * angle with origin on the `startPoint-midPoint` segment, or its explementary angle if required.
+	 * Takes a {@link Point} and calculates the location of a destination point given a distance in
+	 * degrees, radians, miles, or kilometers; and bearing in degrees.
+	 * This uses the [Haversine formula](http://en.wikipedia.org/wiki/Haversine_formula) to account for global curvature.
 	 *
-	 * @name angle
-	 * @param {Coord} startPoint Start Point Coordinates
-	 * @param {Coord} midPoint Mid Point Coordinates
-	 * @param {Coord} endPoint End Point Coordinates
+	 * @name destination
+	 * @param {Coord} origin starting point
+	 * @param {number} distance distance from the origin point
+	 * @param {number} bearing ranging from -180 to 180
 	 * @param {Object} [options={}] Optional parameters
-	 * @param {boolean} [options.explementary=false] Returns the explementary angle instead (360 - angle)
-	 * @param {boolean} [options.mercator=false] if calculations should be performed over Mercator or WGS84 projection
-	 * @returns {number} Angle between the provided points, or its explementary.
+	 * @param {string} [options.units='kilometers'] miles, kilometers, degrees, or radians
+	 * @param {Object} [options.properties={}] Translate properties to Point
+	 * @returns {Feature<Point>} destination point
 	 * @example
-	 * turf.angle([5, 5], [5, 6], [3, 4]);
-	 * //=45
+	 * var point = turf.point([-75.343, 39.984]);
+	 * var distance = 50;
+	 * var bearing = 90;
+	 * var options = {units: 'miles'};
+	 *
+	 * var destination = turf.destination(point, distance, bearing, options);
+	 *
+	 * //addToMap
+	 * var addToMap = [point, destination]
+	 * destination.properties['marker-color'] = '#f00';
+	 * point.properties['marker-color'] = '#0f0';
 	 */
-	function angle(startPoint, midPoint, endPoint, options) {
+	function destination(origin, distance, bearing, options) {
 	    if (options === void 0) { options = {}; }
-	    // Optional Parameters
-	    if (!isObject(options)) {
-	        throw new Error("options is invalid");
-	    }
-	    // Validation
-	    if (!startPoint) {
-	        throw new Error("startPoint is required");
-	    }
-	    if (!midPoint) {
-	        throw new Error("midPoint is required");
-	    }
-	    if (!endPoint) {
-	        throw new Error("endPoint is required");
-	    }
-	    // Rename to shorter variables
-	    var A = startPoint;
-	    var O = midPoint;
-	    var B = endPoint;
+	    // Handle input
+	    var coordinates1 = getCoord(origin);
+	    var longitude1 = degreesToRadians(coordinates1[0]);
+	    var latitude1 = degreesToRadians(coordinates1[1]);
+	    var bearingRad = degreesToRadians(bearing);
+	    var radians = lengthToRadians(distance, options.units);
 	    // Main
-	    var azimuthAO = bearingToAzimuth(options.mercator !== true ? bearing(A, O) : rhumbBearing(A, O));
-	    var azimuthBO = bearingToAzimuth(options.mercator !== true ? bearing(B, O) : rhumbBearing(B, O));
-	    var angleAO = Math.abs(azimuthAO - azimuthBO);
-	    // Explementary angle
-	    if (options.explementary === true) {
-	        return 360 - angleAO;
-	    }
-	    return angleAO;
+	    var latitude2 = Math.asin(Math.sin(latitude1) * Math.cos(radians) +
+	        Math.cos(latitude1) * Math.sin(radians) * Math.cos(bearingRad));
+	    var longitude2 = longitude1 +
+	        Math.atan2(Math.sin(bearingRad) * Math.sin(radians) * Math.cos(latitude1), Math.cos(radians) - Math.sin(latitude1) * Math.sin(latitude2));
+	    var lng = radiansToDegrees(longitude2);
+	    var lat = radiansToDegrees(latitude2);
+	    return point([lng, lat], options.properties);
 	}
 
 	const svg$6 = `<svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 0 24 24">
@@ -1136,45 +1099,59 @@
 	        this.onPointerDown = this.onPointerDown.bind(this);
 	        this.onPointerMove = this.onPointerMove.bind(this);
 	        this.onPointerUp = this.onPointerUp.bind(this);
-	        this.map.addLayer(this.picture.asCircleLayer);
-	        this.map.on('mousedown', this.picture.asCircleLayer.id, this.onPointerDown);
+	        // this.map.addLayer(this.picture.asCircleLayer);
+	        // this.map.on('mousedown', this.picture.asCircleLayer.id, this.onPointerDown);
+	        this.map.on('mousedown', this.picture.asFillLayer.id, this.onPointerDown);
 	    }
 	    static get button() {
 	        return (new Button()).setIcon(icon());
 	    }
 	    onPointerDown(event) {
 	        event.preventDefault();
-	        console.log('222', this.picture);
+	        console.log('onPointerDown');
 	        if (!this.picture)
 	            return;
 	        this.map.getCanvas().style.cursor = Cursor.Grabbing;
 	        this.startPosition = event.lngLat;
+	        this.originalCenter = this.picture.centroid;
+	        this.originalCoords = this.picture.coordinates;
 	        this.map.on('mousemove', this.onPointerMove);
-	        this.map.setLayoutProperty(this.picture.asCircleLayer.id, 'visibility', Visibility.None);
+	        // this.map.setLayoutProperty(this.picture.asCircleLayer.id, 'visibility', Visibility.None);
 	        this.map.setLayoutProperty(this.picture.asLineLayer.id, 'visibility', Visibility.None);
 	        document.addEventListener('pointerup', this.onPointerUp, { once: true });
 	    }
 	    onPointerMove(event) {
-	        if (!this.startPosition)
-	            throw Error('start position is expected');
-	        const currentPosition = event.lngLat;
+	        console.log('rotateMode??');
+	        // if (!this.startPosition) throw Error('start position is expected');
+	        // const currentPosition = event.lngLat;
 	        // const coords = this.picture.position.map((p) => p.toArray());
 	        // console.log(coords);
 	        // console.log(this.picture.centroid);
 	        // console.log(currentPosition.toArray());
-	        console.log(angle(currentPosition.toArray(), this.picture.centroid, this.startPosition.toArray()));
-	        // const deltaLng = this.startPosition.lng - currentPosition.lng;
-	        // const deltaLat = this.startPosition.lat - currentPosition.lat;
-	        // this.onUpdate(this.picture.position.map((p) => new LngLat(p.lng - deltaLng, p.lat - deltaLat)) as PicturePosition);
+	        const draggedBearing = bearing(this.picture.centroid, [event.lngLat.lng, event.lngLat.lat]);
+	        const polyCoords = [];
+	        this.originalCoords.forEach((coords, index) => {
+	            const distanceFromCenter = distance(this.originalCenter, coords);
+	            const bearingFromCenter = bearing(this.originalCenter, coords);
+	            const newPoint = destination(this.originalCenter, distanceFromCenter, bearingFromCenter + draggedBearing);
+	            polyCoords.push(newPoint.geometry.coordinates);
+	        });
+	        this.onUpdate(polyCoords.map((p) => new mapboxGl.exports.LngLat(p[0], p[1])));
 	        // this.startPosition = currentPosition;
 	    }
 	    onPointerUp() {
-	        this.map.getCanvas().style.cursor = Cursor.Move;
+	        this.originalCenter = false;
+	        this.map.getCanvas().style.cursor = Cursor.Grabbing;
 	        this.map.off('mousemove', this.onPointerMove);
+	        // this.map.setLayoutProperty(this.picture.asCircleLayer.id, 'visibility', Visibility.Visible);
 	        this.map.setLayoutProperty(this.picture.asLineLayer.id, 'visibility', Visibility.Visible);
 	    }
 	    destroy() {
-	        this.map.removeLayer(this.picture.asCircleLayer.id);
+	        this.map.getCanvas().style.cursor = Cursor.Default;
+	        this.map.off('mousemove', this.onPointerMove);
+	        this.map.off('mousedown', this.picture.asFillLayer.id, this.onPointerDown);
+	        document.removeEventListener('pointerup', this.onPointerUp);
+	        // this.map.removeLayer(this.picture.asCircleLayer.id);
 	    }
 	}
 
@@ -1275,7 +1252,7 @@
 	    drawPicture(picture) {
 	        this.map.addSource(picture.imageSource.id, picture.imageSource.source);
 	        this.map.addSource(picture.polygonSource.id, picture.polygonSource.source);
-	        // this.map.addSource(picture.pointsSource.id, picture.pointsSource.source);
+	        this.map.addSource(picture.pointSource.id, picture.pointSource.source);
 	        this.map.addLayer(picture.asRasterLayer);
 	        this.map.addLayer(picture.asFillLayer);
 	    }
@@ -1331,7 +1308,7 @@
 	        selectedPicture.position = position;
 	        this.map.getSource(selectedPicture.imageSource.id).setCoordinates(selectedPicture.coordinates);
 	        this.map.getSource(selectedPicture.polygonSource.id).setData(selectedPicture.asPolygon);
-	        // (this.map.getSource(selectedPicture.pointsSource.id) as GeoJSONSource).setData(selectedPicture.asPoints);
+	        this.map.getSource(selectedPicture.pointSource.id).setData(selectedPicture.asPoints);
 	        this.map.fire('picture.update', this.activePicture);
 	    }
 	    setLock(pictureId, value) {
@@ -1356,7 +1333,7 @@
     <path d="M0 0h24v24H0z" fill="none"/>
     <path d="M20 19.59V8l-6-6H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c.45 0 .85-.15 1.19-.4l-4.43-4.43c-.8.52-1.74.83-2.76.83-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5c0 1.02-.31 1.96-.83 2.75L20 19.59zM9 13c0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3-3 1.34-3 3z"/>
 </svg>`;
-	var iconInspect = () => (new DOMParser().parseFromString(svg$5, 'image/svg+xml')).firstChild;
+	var iconKeepOut = () => (new DOMParser().parseFromString(svg$5, 'image/svg+xml')).firstChild;
 
 	const svg$4 = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
     <path d="M14 7l-5 5 5 5V7z"/>
@@ -1496,7 +1473,7 @@
 	    insert() {
 	        this.addClassName('mapbox-control-inspect');
 	        this.buttonInspect
-	            .setIcon(iconInspect())
+	            .setIcon(iconKeepOut())
 	            .onClick(() => {
 	            if (this.isInspecting) {
 	                this.inspectingOff();
@@ -1636,43 +1613,6 @@
 	            return languageCode;
 	        return 'mul';
 	    }
-	}
-
-	//http://en.wikipedia.org/wiki/Haversine_formula
-	//http://www.movable-type.co.uk/scripts/latlong.html
-	/**
-	 * Calculates the distance between two {@link Point|points} in degrees, radians, miles, or kilometers.
-	 * This uses the [Haversine formula](http://en.wikipedia.org/wiki/Haversine_formula) to account for global curvature.
-	 *
-	 * @name distance
-	 * @param {Coord | Point} from origin point or coordinate
-	 * @param {Coord | Point} to destination point or coordinate
-	 * @param {Object} [options={}] Optional parameters
-	 * @param {string} [options.units='kilometers'] can be degrees, radians, miles, or kilometers
-	 * @returns {number} distance between the two points
-	 * @example
-	 * var from = turf.point([-75.343, 39.984]);
-	 * var to = turf.point([-75.534, 39.123]);
-	 * var options = {units: 'miles'};
-	 *
-	 * var distance = turf.distance(from, to, options);
-	 *
-	 * //addToMap
-	 * var addToMap = [from, to];
-	 * from.properties.distance = distance;
-	 * to.properties.distance = distance;
-	 */
-	function distance(from, to, options) {
-	    if (options === void 0) { options = {}; }
-	    var coordinates1 = getCoord(from);
-	    var coordinates2 = getCoord(to);
-	    var dLat = degreesToRadians(coordinates2[1] - coordinates1[1]);
-	    var dLon = degreesToRadians(coordinates2[0] - coordinates1[0]);
-	    var lat1 = degreesToRadians(coordinates1[1]);
-	    var lat2 = degreesToRadians(coordinates2[1]);
-	    var a = Math.pow(Math.sin(dLat / 2), 2) +
-	        Math.pow(Math.sin(dLon / 2), 2) * Math.cos(lat1) * Math.cos(lat2);
-	    return radiansToLength(2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)), options.units);
 	}
 
 	const svg$2 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">

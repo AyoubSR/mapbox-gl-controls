@@ -12,6 +12,7 @@ interface PictureOptions {
 }
 
 class Picture {
+  [x: string]: any;
   id: string;
   url: string;
   width: number;
@@ -68,6 +69,13 @@ class Picture {
     };
   }
 
+  get pointSource(): { id: string; source: GeoJSONSourceRaw } {
+    return {
+      id: `${this.id}-points`,
+      source: { type: 'geojson', data: this.asPoints },
+    };
+  }
+
   get asRasterLayer(): RasterLayer {
     return {
       id: `${this.id}-raster`,
@@ -107,7 +115,7 @@ class Picture {
     return ({
       id: `${this.id}-circle`,
       type: 'circle',
-      source: `${this.id}-polygon`,
+      source: `${this.id}-points`,
       paint: {
         'circle-radius': 5,
         'circle-color': 'rgb(61, 90, 254)',

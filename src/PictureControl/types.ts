@@ -2,7 +2,7 @@ import { LngLat, Map } from 'mapbox-gl';
 import Button from '../Button/Button';
 import Picture from './Picture';
 
-export type PicturePosition = [LngLat, LngLat, LngLat, LngLat]
+export type PicturePosition = LngLat[]
 
 export enum Cursor {
   Default = '',

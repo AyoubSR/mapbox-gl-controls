@@ -6,3 +6,4 @@ export { default as RulerControl } from './RulerControl/RulerControl';
 export { default as StylesControl } from './StylesControl/StylesControl';
 export { default as TooltipControl } from './TooltipControl/TooltipControl';
 export { default as ZoomControl } from './ZoomControl/ZoomControl';
+export { default as KeepOutControl } from './KeepOutControl/KeepOutControl';
